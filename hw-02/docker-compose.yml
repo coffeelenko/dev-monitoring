@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  fix-permissions:
+    image: busybox
+    volumes:
+      - ./prometheus:/prometheus-config
+      - ./grafana:/grafana-data
+    command: >
+      sh -c "
+      chown -R 65534:65534 /prometheus-config;
+      chown -R 65534:65534 /grafana-data;
+      echo 'Permissions fixed';
+      "
+    restart: "no"
+
+  prometheus:
+    image: prom/prometheus:v3
+    container_name: prometheus
+    volumes:
+      - ./prometheus:/etc/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.size=5GB'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    depends_on:
+      - nodeexporter
+    ports:
+      - 9090:9090
+    expose:
+      - 9090
+
+  nodeexporter:
+    image: quay.io/prometheus/node-exporter:latest
+    container_name: nodeexporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|etc|var/lib/docker/.+|var/lib/kubelet/.+)($|/)'
+    restart: unless-stopped
+    expose:
+      - 9100
+
+
+  grafana:
+    image: grafana/grafana:13.2
+    container_name: grafana
+    volumes:
+      - grafana:/var/lib/grafana
+      - ./grafana-config/grafana.ini:/etc/grafana/grafana.ini
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    ports:
+      - 3000:3000
+ 
+  fake-smtp-mail-server:
+    image: maildev/maildev:latest
+    container_name: fake-maildev
+    ports:
+      - 1025:1025
+      - 1080:1080
+    restart: always
+
+
+volumes:
+  prometheus: {}
+  grafana: {}
