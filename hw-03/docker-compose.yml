@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  # --- HOT нода ---
+  es-hot:
+    image: elasticsearch:9.5.5
+    container_name: es-hot
+    environment:
+      - node.name=es-hot
+      - cluster.name=es-docker-cluster
+      - discovery.seed_hosts=es-warm
+      - cluster.initial_master_nodes=es-hot,es-warm
+      - node.roles=master,data_hot,data_content
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - es-hot-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - elastic-net
+
+  # --- WARM нода ---
+  es-warm:
+    image: elasticsearch:9.5.5
+    container_name: es-warm
+    environment:
+      - node.name=es-warm
+      - cluster.name=es-docker-cluster
+      - discovery.seed_hosts=es-hot
+      - cluster.initial_master_nodes=es-hot,es-warm
+      - node.roles=master,data_warm
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - es-warm-data:/usr/share/elasticsearch/data
+    networks:
+      - elastic-net
+
+  # --- Kibana ---
+  kibana:
+    image: kibana:9.5.5
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://es-hot:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      - es-hot
+    networks:
+      - elastic-net
+
+  # --- Logstash ---
+  logstash:
+    image: logstash:9.5.5
+    container_name: logstash
+    volumes:
+      - ./conf/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+    ports:
+      - "5000:5000/tcp"   # для json
+      - "5044:5044"       # для filebeat
+    environment:
+      - "LS_JAVA_OPTS=-Xms256m -Xmx256m"
+    depends_on:
+      - es-hot
+    networks:
+      - elastic-net
+
+  # --- Filebeat ---
+  filebeat:
+    image: elastic/filebeat:9.5.6
+    container_name: filebeat
+    user: root
+    volumes:
+      - ./conf/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - logstash
+    networks:
+      - elastic-net
+
+  some_app:
+    image: library/python:3.9-alpine
+    container_name: some_app
+    volumes:
+      - ./pinger/:/opt/:Z
+    entrypoint: python3 /opt/run.py
+
+volumes:
+  es-hot-data:
+  es-warm-data:
+
+networks:
+  elastic-net:
+    driver: bridge
